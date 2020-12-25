@@ -1,7 +1,6 @@
 #pragma once
 
 #include "CorProfiler.h"
-#include <map>
 
 FunctionID FunctionMapper(FunctionID funcId, BOOL* pbHookFunction);
 

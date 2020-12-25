@@ -17,7 +17,7 @@ namespace GroboServer
     class Program
     {
         private static readonly bool ENABLE_LOGGING = false;
-        private static readonly int BUFFER_SIZE = 1024 * 1024;
+        private static readonly int BUFFER_SIZE = 32 * 1024 * 2; // A WCHAR is 2 bytes
 
         private static readonly List<int> tracedProcesses = new List<int>();
         private static readonly HashSet<int> tracedManagedThreadIds = new HashSet<int>();
@@ -243,22 +243,22 @@ namespace GroboServer
                 MethodBaseTracingInstaller.methodMap = new Dictionary<int, MethodBase>();
             }
 
-            var server = new NamedPipeServerStream("tracer");//, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.None, BUFFER_SIZE, BUFFER_SIZE);
+            var server = new NamedPipeServerStream("tracer", PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.None, BUFFER_SIZE, BUFFER_SIZE);
             Console.WriteLine("Waiting for client to connect ..");
             server.WaitForConnection();
             Console.WriteLine("Client connected - listening for packets!");
-            var reader = new StreamReader(server);//, Encoding.Unicode, false, BUFFER_SIZE);
+            var reader = new StreamReader(server, Encoding.Unicode);//, false, BUFFER_SIZE);
             stopwatch = Stopwatch.StartNew();
 
             while (true)
             {
                 //var start = stopwatch.ElapsedTicks;
                 var line = reader.ReadLine();
+                //Console.WriteLine(line);
                 //var stop = stopwatch.ElapsedTicks;
                 //Console.WriteLine($"{stop - start} -> {line}");
-
-                // Processing commented out to test performance of the C++ part of the profiler.
-                /*if (line.Length > 0)
+                /*
+                if (line.Length > 0)
                 {
                     //var processingStart = stopwatch.ElapsedTicks;
                     //Console.WriteLine(line);

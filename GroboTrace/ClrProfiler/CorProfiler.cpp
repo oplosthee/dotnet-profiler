@@ -235,7 +235,7 @@ HRESULT STDMETHODCALLTYPE CorProfiler::Initialize(IUnknown *pICorProfilerInfoUnk
         }
 
         // Configure the communication over the pipe.
-        /*DWORD dwMode = PIPE_READMODE_MESSAGE;
+        /*DWORD dwMode = PIPE_READMODE_BYTE;
         BOOL fSucces = SetNamedPipeHandleState(
             hPipe,
             &dwMode,
@@ -250,14 +250,18 @@ HRESULT STDMETHODCALLTYPE CorProfiler::Initialize(IUnknown *pICorProfilerInfoUnk
         }*/
     }
 
-	DWORD eventMask = needProfile
+	/*DWORD eventMask = needProfile
         ? COR_PRF_MONITOR_JIT_COMPILATION
         | COR_PRF_ENABLE_REJIT
-        | COR_PRF_DISABLE_ALL_NGEN_IMAGES                      /* the last two masks are set to enable reJIT - NGENd images must be ignored for this */
-		| COR_PRF_DISABLE_TRANSPARENCY_CHECKS_UNDER_FULL_TRUST /* helps the case where this profiler is used on Full CLR */
-															   /*| COR_PRF_DISABLE_INLINING*/
+        | COR_PRF_DISABLE_ALL_NGEN_IMAGES                      // the last two masks are set to enable reJIT - NGENd images must be ignored for this
+		| COR_PRF_DISABLE_TRANSPARENCY_CHECKS_UNDER_FULL_TRUST // helps the case where this profiler is used on Full CLR
+															   //| COR_PRF_DISABLE_INLINING
         | COR_PRF_MONITOR_ENTERLEAVE
-		: COR_PRF_MONITOR_NONE;
+		: COR_PRF_MONITOR_NONE;*/
+
+    DWORD eventMask = needProfile
+        ? COR_PRF_MONITOR_ENTERLEAVE
+        : COR_PRF_MONITOR_NONE;
 
 #else
 	DWORD eventMask = COR_PRF_MONITOR_JIT_COMPILATION

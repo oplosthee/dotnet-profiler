@@ -1,4 +1,7 @@
 #include "Callbacks.h"
+#include <map>
+
+static const int MAXIMUM_PACKET_SIZE = 16 * 1024;
 
 struct FunctionData
 {
@@ -6,106 +9,44 @@ struct FunctionData
 };
 
 std::map<FunctionID, FunctionData> functionMap;
-
-std::vector<clock_t> intervals;
-clock_t min = 1000;
-clock_t max = -1000;
+thread_local std::wstring queue;
 
 extern "C" void _stdcall SendPacket(WCHAR *type, FunctionID funcId)
 {
-    //Log(L"SendPacket Enter");
+    WCHAR packet[1024];
+    thread::id threadId = std::this_thread::get_id();
+    wsprintf(packet, L"PROFILER\x01%d\x01%ls\x01%d\r\n", threadId, type, funcId);
 
-    /*ClassID classId;
-    ModuleID moduleId;
-    mdMethodDef methodId;
-    corProfiler->corProfilerInfo->GetFunctionInfo(funcId, &classId, &moduleId, &methodId);
-
-    ULONG actualModuleNameSize;
-    WCHAR moduleNameBuffer[1024];
-    AssemblyID assemblyId;
-    corProfiler->corProfilerInfo->GetModuleInfo(moduleId, 0, 1024, &actualModuleNameSize, moduleNameBuffer, &assemblyId);
-
-    ULONG actualAssemblyNameSize;
-    WCHAR assemblyNameBuffer[1024];
-    corProfiler->corProfilerInfo->GetAssemblyInfo(assemblyId, 1024, &actualAssemblyNameSize, assemblyNameBuffer, 0, 0);
-
-    CComPtr<IMetaDataImport> metadataImport;
-    corProfiler->corProfilerInfo->GetModuleMetaData(moduleId, ofRead | ofWrite, IID_IMetaDataImport, reinterpret_cast<IUnknown**>(&metadataImport));
-
-    mdTypeDef typeDefToken;
-    WCHAR methodNameBuffer[1024];
-    ULONG actualMethodNameSize;
-    metadataImport->GetMethodProps(methodId, &typeDefToken, methodNameBuffer, 1024, &actualMethodNameSize, 0, 0, 0, 0, 0);
-
-    WCHAR typeNameBuffer[1024];
-    ULONG actualTypeNameSize;
-    metadataImport->GetTypeDefProps(typeDefToken, typeNameBuffer, 1024, &actualTypeNameSize, 0, 0);*/
-
-    // Retrieve the function metadata from the map
-    std::map<FunctionID, FunctionData>::iterator iter = functionMap.find(funcId);
-    if (iter != functionMap.end())
+    DWORD cbToWrite = (lstrlen(packet) + 1) * sizeof(WCHAR);
+    DWORD queueLength = queue.length() * sizeof(WCHAR);
+    if (queueLength + cbToWrite > MAXIMUM_PACKET_SIZE)
     {
-        //Log(L"SendPacket Found");
-        FunctionData functionData = iter->second;
-
-        WCHAR lpvMessage[1024];
-        thread::id threadId = std::this_thread::get_id();
-        //Log(L"SendPacket Format");
-        // "PROFILER" is prepended so we can determine the bounds of the packet and see whether it is malformed.
-        wsprintf(lpvMessage, L"PROFILER\x01%d\x01%ls\x01%d\x01%ls\r\n", threadId, type, funcId, functionData.name.c_str());
-
-        DWORD cbToWrite = (lstrlen(lpvMessage) + 1) * sizeof(WCHAR);
         DWORD cbWritten;
-        //Log(L"SendPacket Copied");
-
-        //clock_t t = clock();
         BOOL fSuccess = WriteFile(
             hPipe,
-            lpvMessage,
-            cbToWrite,
+            queue.c_str(),
+            queueLength,
             &cbWritten,
             NULL
         );
 
-        //Log(L"SendPacket Sent");
-
         if (!fSuccess)
             Log(L"WriteFile to pipe failed.");
+
+        queue.clear();
     }
 
-    /*
-    t = clock() - t;
-
-    intervals.push_back(t);
-
-    if (t > max)
-        max = t;
-
-    if (t < min)
-        min = t;
-
-    if (intervals.size() >= 100)
-    {
-        double average = std::accumulate(intervals.begin(), intervals.end(), 0.0) / intervals.size();
-        WCHAR buffer[1024];
-        swprintf(buffer, L"Last 100 calls: min:%d, max:%d, avg:%f\r\n", min, max, average);
-        Log(buffer);
-
-        intervals.clear();
-        min = 1000;
-        max = -1000;
-    }*/
+    queue.append(packet);
 }
 
 FunctionID FunctionMapper(FunctionID funcId, BOOL* pbHookFunction)
 {
-    //Log(L"FunctionMapper Enter");
     // Check if the function already exists in the map
     std::map<FunctionID, FunctionData>::iterator iter = functionMap.find(funcId);
+
     // Function does not exist in the map yet, so we retrieve the metadata and store it.
     if (iter == functionMap.end())
     {
-        //Log(L"FunctionMapper Not Found");
         HRESULT res = S_OK;
         mdMethodDef methodId;
         CComPtr<IMetaDataImport> metadataImport;
@@ -113,7 +54,6 @@ FunctionID FunctionMapper(FunctionID funcId, BOOL* pbHookFunction)
 
         if (SUCCEEDED(res))
         {
-            //Log(L"FunctionMapper succ1");
             mdTypeDef typeDefToken;
             WCHAR methodNameBuffer[1024];
             ULONG actualMethodNameSize;
@@ -121,26 +61,30 @@ FunctionID FunctionMapper(FunctionID funcId, BOOL* pbHookFunction)
 
             if (SUCCEEDED(res))
             {
-                //Log(L"FunctionMapper succ2");
                 WCHAR typeNameBuffer[1024];
                 ULONG actualTypeNameSize;
                 res = metadataImport->GetTypeDefProps(typeDefToken, typeNameBuffer, 1024, &actualTypeNameSize, 0, 0);
 
                 if (SUCCEEDED(res))
                 {
-                    //Log(L"FunctionMapper Adding");
                     WCHAR data[2048];
                     wsprintf(data, L"%ls\x01%ls", typeNameBuffer, methodNameBuffer);
 
                     FunctionData functionData = { std::wstring(data) };
                     functionMap.insert(std::pair<FunctionID, FunctionData>(funcId, functionData));
-                    //Log(L"FunctionMapper Added");
+
+                    WCHAR lpvMessage[1024];
+                    thread::id threadId = std::this_thread::get_id();
+                    wsprintf(lpvMessage, L"PROFILER\x01%d\x01%ls\x01%d\x01%ls\r\n", threadId, L"MAP", funcId, data);
+
+                    // Append the message to the send queue. This might exceed MAXIMUM_PACKET_SIZE by one packet.
+                    // The buffer on the server is however large enough to accommodate for this.
+                    queue.append(lpvMessage);
                 }
             }
         }
     }
 
-    //Log(L"FunctionMapper Leave");
     return funcId;
 }
 
