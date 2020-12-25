@@ -3,12 +3,6 @@
 
 static const int MAXIMUM_PACKET_SIZE = 16 * 1024;
 
-struct FunctionData
-{
-    std::wstring name;
-};
-
-std::map<FunctionID, FunctionData> functionMap;
 thread_local std::wstring queue;
 
 extern "C" void _stdcall SendPacket(WCHAR *type, FunctionID funcId)
@@ -41,46 +35,33 @@ extern "C" void _stdcall SendPacket(WCHAR *type, FunctionID funcId)
 
 FunctionID FunctionMapper(FunctionID funcId, BOOL* pbHookFunction)
 {
-    // Check if the function already exists in the map
-    std::map<FunctionID, FunctionData>::iterator iter = functionMap.find(funcId);
+    HRESULT res = S_OK;
+    mdMethodDef methodId;
+    CComPtr<IMetaDataImport> metadataImport;
+    res = corProfiler->corProfilerInfo->GetTokenAndMetaDataFromFunction(funcId, IID_IMetaDataImport, reinterpret_cast<IUnknown**>(&metadataImport), &methodId);
 
-    // Function does not exist in the map yet, so we retrieve the metadata and store it.
-    if (iter == functionMap.end())
+    if (SUCCEEDED(res))
     {
-        HRESULT res = S_OK;
-        mdMethodDef methodId;
-        CComPtr<IMetaDataImport> metadataImport;
-        res = corProfiler->corProfilerInfo->GetTokenAndMetaDataFromFunction(funcId, IID_IMetaDataImport, reinterpret_cast<IUnknown**>(&metadataImport), &methodId);
+        mdTypeDef typeDefToken;
+        WCHAR methodNameBuffer[1024];
+        ULONG actualMethodNameSize;
+        res = metadataImport->GetMethodProps(methodId, &typeDefToken, methodNameBuffer, 1024, &actualMethodNameSize, 0, 0, 0, 0, 0);
 
         if (SUCCEEDED(res))
         {
-            mdTypeDef typeDefToken;
-            WCHAR methodNameBuffer[1024];
-            ULONG actualMethodNameSize;
-            res = metadataImport->GetMethodProps(methodId, &typeDefToken, methodNameBuffer, 1024, &actualMethodNameSize, 0, 0, 0, 0, 0);
+            WCHAR typeNameBuffer[1024];
+            ULONG actualTypeNameSize;
+            res = metadataImport->GetTypeDefProps(typeDefToken, typeNameBuffer, 1024, &actualTypeNameSize, 0, 0);
 
             if (SUCCEEDED(res))
             {
-                WCHAR typeNameBuffer[1024];
-                ULONG actualTypeNameSize;
-                res = metadataImport->GetTypeDefProps(typeDefToken, typeNameBuffer, 1024, &actualTypeNameSize, 0, 0);
+                WCHAR lpvMessage[1024];
+                thread::id threadId = std::this_thread::get_id();
+                wsprintf(lpvMessage, L"PROFILER\x01%d\x01%ls\x01%d\x01%ls\x01%ls\r\n", threadId, L"MAP", funcId, typeNameBuffer, methodNameBuffer);
 
-                if (SUCCEEDED(res))
-                {
-                    WCHAR data[2048];
-                    wsprintf(data, L"%ls\x01%ls", typeNameBuffer, methodNameBuffer);
-
-                    FunctionData functionData = { std::wstring(data) };
-                    functionMap.insert(std::pair<FunctionID, FunctionData>(funcId, functionData));
-
-                    WCHAR lpvMessage[1024];
-                    thread::id threadId = std::this_thread::get_id();
-                    wsprintf(lpvMessage, L"PROFILER\x01%d\x01%ls\x01%d\x01%ls\r\n", threadId, L"MAP", funcId, data);
-
-                    // Append the message to the send queue. This might exceed MAXIMUM_PACKET_SIZE by one packet.
-                    // The buffer on the server is however large enough to accommodate for this.
-                    queue.append(lpvMessage);
-                }
+                // Append the message to the send queue. This might exceed MAXIMUM_PACKET_SIZE by one packet.
+                // The buffer on the server is however large enough to accommodate for this.
+                queue.append(lpvMessage);
             }
         }
     }
