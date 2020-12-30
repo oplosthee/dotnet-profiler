@@ -4,17 +4,16 @@ static const int QUEUE_SIZE_THRESHOLD = 16 * 1024;
 
 std::map<thread::id, std::wstring> queueMap;
 
-extern "C" void _stdcall SendPacket(WCHAR *type, FunctionID funcId)
+void EnqueuePacket(WCHAR* data, BOOL flush)
 {
-    WCHAR packet[1024];
-    thread::id threadId = std::this_thread::get_id();
-    wsprintf(packet, L"PROFILER\x01%d\x01%ls\x01%d\r\n", threadId, type, funcId);
-
     // The queue map gets populated on thread creation, so it can be guaranteed the key exists.
     auto it = queueMap.find(std::this_thread::get_id());
-    DWORD cbToWrite = (lstrlen(packet) + 1) * sizeof(WCHAR);
+
+    it->second.append(data);
+
+    DWORD cbToWrite = (lstrlen(data) + 1) * sizeof(WCHAR);
     DWORD queueLength = it->second.length() * sizeof(WCHAR);
-    if (queueLength + cbToWrite > QUEUE_SIZE_THRESHOLD)
+    if (flush || (queueLength + cbToWrite > QUEUE_SIZE_THRESHOLD))
     {
         DWORD cbWritten;
         BOOL fSuccess = WriteFile(
@@ -30,8 +29,15 @@ extern "C" void _stdcall SendPacket(WCHAR *type, FunctionID funcId)
 
         it->second.clear();
     }
+}
 
-    it->second.append(packet);
+extern "C" void _stdcall SendFunctionPacket(WCHAR *type, FunctionID funcId)
+{
+    WCHAR packet[1024];
+    thread::id threadId = std::this_thread::get_id();
+    wsprintf(packet, L"PROFILER\x01%d\x01%ls\x01%d\r\n", threadId, type, funcId);
+
+    EnqueuePacket(packet, false);
 }
 
 FunctionID FunctionMapper(FunctionID funcId, BOOL* pbHookFunction)
@@ -56,13 +62,11 @@ FunctionID FunctionMapper(FunctionID funcId, BOOL* pbHookFunction)
 
             if (SUCCEEDED(res))
             {
-                WCHAR lpvMessage[1024];
+                WCHAR packet[1024];
                 thread::id threadId = std::this_thread::get_id();
-                wsprintf(lpvMessage, L"PROFILER\x01%d\x01%ls\x01%d\x01%ls\x01%ls\r\n", threadId, L"MAP", funcId, typeNameBuffer, methodNameBuffer);
+                wsprintf(packet, L"PROFILER\x01%d\x01%ls\x01%d\x01%ls\x01%ls\r\n", threadId, L"MAP", funcId, typeNameBuffer, methodNameBuffer);
 
-                // Append the message to the send queue. This might exceed MAXIMUM_PACKET_SIZE by one packet.
-                // The buffer on the server is however large enough to accommodate for this.
-                queueMap.find(std::this_thread::get_id())->second.append(lpvMessage);
+                EnqueuePacket(packet, true);
             }
         }
     }
@@ -74,17 +78,17 @@ FunctionID FunctionMapper(FunctionID funcId, BOOL* pbHookFunction)
 
 void __fastcall FunctionEnterNaked(FunctionID funcId, UINT_PTR clientData, COR_PRF_FRAME_INFO func, COR_PRF_FUNCTION_ARGUMENT_INFO* argumentInfo)
 {
-    SendPacket(L"ENTER", funcId);
+    SendFunctionPacket(L"ENTER", funcId);
 }
 
 void __fastcall FunctionLeaveNaked(FunctionID funcId, UINT_PTR clientdata, COR_PRF_FRAME_INFO func, COR_PRF_FUNCTION_ARGUMENT_RANGE* retvalRange)
 {
-    SendPacket(L"LEAVE", funcId);
+    SendFunctionPacket(L"LEAVE", funcId);
 }
 
 void __fastcall FunctionTailcallNaked(FunctionID funcId, UINT_PTR clientData, COR_PRF_FRAME_INFO func)
 {
-    SendPacket(L"TAILCALL", funcId);
+    SendFunctionPacket(L"TAILCALL", funcId);
 }
 
 #else
