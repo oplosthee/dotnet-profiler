@@ -25,6 +25,7 @@ namespace GroboServer
         private static readonly Stack<long> functionStartTimes = new Stack<long>();
         private static readonly Dictionary<int, long> threadFirstSeen = new Dictionary<int, long>();
         private static readonly Dictionary<int, long> threadLastSeen = new Dictionary<int, long>();
+        private static readonly Dictionary<int, MethodBase> methodMap = new Dictionary<int, MethodBase>();
 
         private static Stopwatch stopwatch;
         private static bool hasTraced = false;
@@ -250,44 +251,68 @@ namespace GroboServer
             var reader = new StreamReader(server, Encoding.Unicode);//, false, BUFFER_SIZE);
             stopwatch = Stopwatch.StartNew();
 
-            while (true)
+            bool isListening = true;
+            while (isListening)
             {
                 //var start = stopwatch.ElapsedTicks;
                 var line = reader.ReadLine();
                 //Console.WriteLine(line);
                 //var stop = stopwatch.ElapsedTicks;
                 //Console.WriteLine($"{stop - start} -> {line}");
-                /*
                 if (line.Length > 0)
                 {
                     //var processingStart = stopwatch.ElapsedTicks;
                     //Console.WriteLine(line);
                     Log($"Received: {line}");
                     var parts = line.Split('\x01');
-                    if (parts.Length != 6 || !parts[0].EndsWith("PROFILER"))
+                    if (parts.Length < 3 || parts.Length > 6 || !parts[0].EndsWith("PROFILER"))
                     {
                         Console.WriteLine($"Malformed message received: {line}");
                         Console.WriteLine("Stopping server and saving logs..");
                         break;
                     }
 
-                    MethodBase method = new CustomMethodBase();
-                    Type type = new CustomType();
+                    TracerPacket packet = new TracerPacket
+                    {
+                        ManagedThreadId = int.Parse(parts[1]),
+                        ThreadName = parts[1] // We do not have thread names in unmanaged code, so set it to the ID for compatability.
+                    };
 
-                    FieldInfo methodBaseNameField = typeof(CustomMethodBase).GetField("<Name>k__BackingField", BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static);
-                    FieldInfo methodBaseTypeField = typeof(CustomMethodBase).GetField("<ReflectedType>k__BackingField", BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static);
-                    FieldInfo typeNameField = typeof(CustomType).GetField("<Name>k__BackingField", BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static);
+                    switch (parts[2])
+                    {
+                        case "MAP":
+                            MethodBase method = new CustomMethodBase();
+                            Type type = new CustomType();
 
-                    methodBaseNameField.SetValue(method, parts[5]);
-                    methodBaseTypeField.SetValue(method, type);
-                    typeNameField.SetValue(method.ReflectedType, parts[4]);
+                            FieldInfo methodBaseNameField = typeof(CustomMethodBase).GetField("<Name>k__BackingField", BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static);
+                            FieldInfo methodBaseTypeField = typeof(CustomMethodBase).GetField("<ReflectedType>k__BackingField", BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static);
+                            FieldInfo typeNameField = typeof(CustomType).GetField("<Name>k__BackingField", BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static);
 
-                    TracerPacket packet = new TracerPacket();
-                    packet.ManagedThreadId = int.Parse(parts[1]);
+                            methodBaseNameField.SetValue(method, parts[5]);
+                            methodBaseTypeField.SetValue(method, type);
+                            typeNameField.SetValue(method.ReflectedType, parts[4]);
 
-                    packet.ThreadName = parts[1]; // We do not have thread names in unmanaged code, so set it to the ID for compatability.
-                    packet.MethodId = Math.Abs(int.Parse(parts[3]));
-                    packet.Method = method;
+                            // TODO: It might be possible to merge this map with MethodBaseTracingInstaller.methodMap.
+                            packet.MethodId = Math.Abs(int.Parse(parts[3]));
+                            methodMap[packet.MethodId] = method;
+                            continue;
+                        case "ENTER":
+                            packet.MethodId = Math.Abs(int.Parse(parts[3]));
+                            packet.Type = TracerPacket.PacketType.MethodStarted;
+                            break;
+                        case "LEAVE":
+                        case "TAILCALL":
+                            // Both of these need to exit the current node in the call tree, so they're treated equally.
+                            packet.MethodId = Math.Abs(int.Parse(parts[3]));
+                            packet.Type = TracerPacket.PacketType.MethodFinished;
+                            break;
+                        case "QUIT":
+                            isListening = false;
+                            continue;
+                        default:
+                            Console.WriteLine($"Error: Unimplemented packet type: {parts[2]}");
+                            return;
+                    }
 
                     // These statements keep track of the lifetime of a thread.
                     // This is done so we can accurately calculate the time spent per function relative to the lifetime of the thread.
@@ -298,26 +323,22 @@ namespace GroboServer
 
                     threadLastSeen[packet.ManagedThreadId] = GetCurrentRuntime();
 
-                    switch (parts[2])
+                    // Sanity check to guarantee all called functions have been mapped. This should *NOT* happen.
+                    if (!methodMap.ContainsKey(packet.MethodId))
                     {
-                        case "ENTER":
-                            packet.Type = TracerPacket.PacketType.MethodStarted;
-                            break;
-                        case "LEAVE":
-                        case "TAILCALL":
-                            // Both of these need to exit the current node in the call tree, so they're treated equally.
-                            packet.Type = TracerPacket.PacketType.MethodFinished;
-                            break;
-                        default:
-                            Console.WriteLine($"Warning: Unimplemented packet type: {parts[2]}");
-                            return;
+                        Console.WriteLine($"Error: Called unmapped function: {line}");
+                        return;
+                    }
+                    else
+                    {
+                        packet.Method = methodMap[packet.MethodId];
                     }
 
                     //Console.WriteLine($"Processing: {stopwatch.ElapsedTicks - processingStart}");
                     //var submitStart = stopwatch.ElapsedTicks;
                     OnClientMessage(null, packet);
                     //Console.WriteLine($"Submitting: {stopwatch.ElapsedTicks - submitStart}");
-                }*/
+                }
             }
 
             stopwatch.Stop();
