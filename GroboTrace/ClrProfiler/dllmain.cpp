@@ -35,7 +35,7 @@ BOOL STDMETHODCALLTYPE DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID
                     Log(L"WriteFile to pipe failed.");
             }
 
-            // If we dumped the queues, we finish it communication by sending a "QUIT" packet.
+            // If we dumped the queues, we finish the communication by sending a "QUIT" packet.
             if (fSuccess)
             {
                 WCHAR packet[1024];
