@@ -261,6 +261,7 @@ HRESULT STDMETHODCALLTYPE CorProfiler::Initialize(IUnknown *pICorProfilerInfoUnk
 
     DWORD eventMask = needProfile
         ? COR_PRF_MONITOR_ENTERLEAVE
+        | COR_PRF_MONITOR_THREADS
         : COR_PRF_MONITOR_NONE;
 
 #else
@@ -797,6 +798,8 @@ HRESULT STDMETHODCALLTYPE CorProfiler::JITInlining(FunctionID callerId, Function
 
 HRESULT STDMETHODCALLTYPE CorProfiler::ThreadCreated(ThreadID threadId)
 {
+    queueMap[std::this_thread::get_id()] = std::wstring();
+
     return S_OK;
 }
 

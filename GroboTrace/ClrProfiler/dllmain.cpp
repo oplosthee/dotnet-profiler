@@ -3,6 +3,7 @@
 
 #include "ClassFactory.h"
 #include "CorProfiler.h"
+#include "Callbacks.h"
 
 const IID IID_IUnknown      = { 0x00000000, 0x0000, 0x0000, { 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46 } };
 
@@ -14,6 +15,43 @@ BOOL STDMETHODCALLTYPE DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID
     {
         case DLL_PROCESS_DETACH:
             OutputDebugString(L"grobotrace: DLL_PROCESS_DETACH");
+
+            // Iterate through all the thread-local queues and send them to the server.
+            std::map<thread::id, std::wstring>::iterator it;
+            BOOL fSuccess;
+
+            for (it = queueMap.begin(); it != queueMap.end(); it++)
+            {
+                DWORD cbWritten;
+                fSuccess = WriteFile(
+                    hPipe,
+                    it->second.c_str(),
+                    it->second.length() * sizeof(WCHAR),
+                    &cbWritten,
+                    NULL
+                );
+
+                if (!fSuccess)
+                    Log(L"WriteFile to pipe failed.");
+            }
+
+            // If we dumped the queues, we finish it communication by sending a "QUIT" packet.
+            if (fSuccess)
+            {
+                WCHAR packet[1024];
+                thread::id threadId = std::this_thread::get_id();
+                wsprintf(packet, L"PROFILER\x01%d\x01%ls\r\n", threadId, L"QUIT");
+
+                DWORD cbWritten;
+                WriteFile(
+                    hPipe,
+                    packet,
+                    (lstrlen(packet) + 1) * sizeof(WCHAR),
+                    &cbWritten,
+                    NULL
+                );
+            }
+
             break;
     }
     return TRUE;

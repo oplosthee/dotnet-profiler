@@ -1,9 +1,8 @@
 #include "Callbacks.h"
-#include <map>
 
-static const int MAXIMUM_PACKET_SIZE = 16 * 1024;
+static const int QUEUE_SIZE_THRESHOLD = 16 * 1024;
 
-thread_local std::wstring queue;
+std::map<thread::id, std::wstring> queueMap;
 
 extern "C" void _stdcall SendPacket(WCHAR *type, FunctionID funcId)
 {
@@ -11,14 +10,16 @@ extern "C" void _stdcall SendPacket(WCHAR *type, FunctionID funcId)
     thread::id threadId = std::this_thread::get_id();
     wsprintf(packet, L"PROFILER\x01%d\x01%ls\x01%d\r\n", threadId, type, funcId);
 
+    // The queue map gets populated on thread creation, so it can be guaranteed the key exists.
+    auto it = queueMap.find(std::this_thread::get_id());
     DWORD cbToWrite = (lstrlen(packet) + 1) * sizeof(WCHAR);
-    DWORD queueLength = queue.length() * sizeof(WCHAR);
-    if (queueLength + cbToWrite > MAXIMUM_PACKET_SIZE)
+    DWORD queueLength = it->second.length() * sizeof(WCHAR);
+    if (queueLength + cbToWrite > QUEUE_SIZE_THRESHOLD)
     {
         DWORD cbWritten;
         BOOL fSuccess = WriteFile(
             hPipe,
-            queue.c_str(),
+            it->second.c_str(),
             queueLength,
             &cbWritten,
             NULL
@@ -27,10 +28,10 @@ extern "C" void _stdcall SendPacket(WCHAR *type, FunctionID funcId)
         if (!fSuccess)
             Log(L"WriteFile to pipe failed.");
 
-        queue.clear();
+        it->second.clear();
     }
 
-    queue.append(packet);
+    it->second.append(packet);
 }
 
 FunctionID FunctionMapper(FunctionID funcId, BOOL* pbHookFunction)
@@ -61,7 +62,7 @@ FunctionID FunctionMapper(FunctionID funcId, BOOL* pbHookFunction)
 
                 // Append the message to the send queue. This might exceed MAXIMUM_PACKET_SIZE by one packet.
                 // The buffer on the server is however large enough to accommodate for this.
-                queue.append(lpvMessage);
+                queueMap.find(std::this_thread::get_id())->second.append(lpvMessage);
             }
         }
     }

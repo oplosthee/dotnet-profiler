@@ -2,6 +2,8 @@
 
 #include "CorProfiler.h"
 
+#include <map>
+
 FunctionID FunctionMapper(FunctionID funcId, BOOL* pbHookFunction);
 
 #ifdef _WIN64
@@ -17,3 +19,5 @@ void FunctionLeaveNaked(FunctionID funcId, UINT_PTR clientdata, COR_PRF_FRAME_IN
 void FunctionTailcallNaked(FunctionID funcId, UINT_PTR clientData, COR_PRF_FRAME_INFO func);
 
 #endif
+
+extern std::map<thread::id, std::wstring> queueMap;
