@@ -8,5 +8,6 @@ namespace GroboTrace
         public double Percent { get; set; }
         public long Ticks { get; set; }
         public int Calls { get; set; }
+        public long FirstCall { get; set; }
     }
 }

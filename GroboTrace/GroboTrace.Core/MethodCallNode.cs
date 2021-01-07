@@ -38,13 +38,14 @@ namespace GroboTrace.Core
                     Method = MethodBaseTracingInstaller.GetMethod(MethodId),
                     Calls = Calls,
                     Ticks = Ticks,
+                    FirstCall = FirstCall,
                     Percent = totalTicks == 0 ? 0.0 : Ticks * 100.0 / totalTicks
                 },
                 Children = Children.Select(child =>
                     {
                         var childStats = child.GetStats(totalTicks);
                         return childStats;
-                    }).OrderByDescending(stats => stats.MethodStats.Ticks).
+                    }).OrderBy(stats => stats.MethodStats.FirstCall).
                                         ToArray()
             };
         }
@@ -89,6 +90,8 @@ namespace GroboTrace.Core
         public int MethodId { get; set; }
         public int Calls { get; set; }
         public long Ticks { get; set; }
+
+        public long FirstCall = System.Diagnostics.Stopwatch.GetTimestamp();
 
         public IEnumerable<MethodCallNode> Children { get { return edges.Children.Where(node => node.Calls > 0); } }
 

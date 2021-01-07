@@ -17,7 +17,7 @@ namespace GroboServer
     class Program
     {
         private static readonly bool ENABLE_LOGGING = false;
-        private static readonly int BUFFER_SIZE = 32 * 1024 * 2; // A WCHAR is 2 bytes
+        private static readonly int BUFFER_SIZE = 64 * 1024 * 2; // A WCHAR is 2 bytes
 
         private static readonly List<int> tracedProcesses = new List<int>();
         private static readonly HashSet<int> tracedManagedThreadIds = new HashSet<int>();
@@ -25,7 +25,7 @@ namespace GroboServer
         private static readonly Stack<long> functionStartTimes = new Stack<long>();
         private static readonly Dictionary<int, long> threadFirstSeen = new Dictionary<int, long>();
         private static readonly Dictionary<int, long> threadLastSeen = new Dictionary<int, long>();
-        private static readonly Dictionary<int, MethodBase> methodMap = new Dictionary<int, MethodBase>();
+        //private static readonly Dictionary<int, MethodBase> methodMap = new Dictionary<int, MethodBase>();
 
         private static Stopwatch stopwatch;
         private static bool hasTraced = false;
@@ -292,9 +292,11 @@ namespace GroboServer
                             methodBaseTypeField.SetValue(method, type);
                             typeNameField.SetValue(method.ReflectedType, parts[4]);
 
-                            // TODO: It might be possible to merge this map with MethodBaseTracingInstaller.methodMap.
+                            // TODO: It might be possible to merge this map with MethodBaseTracingInstaller.methodMap
                             packet.MethodId = Math.Abs(int.Parse(parts[3]));
-                            methodMap[packet.MethodId] = method;
+
+                            MethodBaseTracingInstaller.AddMethodToMap(method, packet.MethodId);
+                            //methodMap[packet.MethodId] = method;
                             continue;
                         case "ENTER":
                             packet.MethodId = Math.Abs(int.Parse(parts[3]));
@@ -324,7 +326,7 @@ namespace GroboServer
                     threadLastSeen[packet.ManagedThreadId] = GetCurrentRuntime();
 
                     // Sanity check to guarantee all called functions have been mapped. This should *NOT* happen.
-                    if (!methodMap.ContainsKey(packet.MethodId))
+                    /*if (!methodMap.ContainsKey(packet.MethodId))
                     {
                         Console.WriteLine($"Error: Called unmapped function: {line}");
                         return;
@@ -332,7 +334,7 @@ namespace GroboServer
                     else
                     {
                         packet.Method = methodMap[packet.MethodId];
-                    }
+                    }*/
 
                     //Console.WriteLine($"Processing: {stopwatch.ElapsedTicks - processingStart}");
                     //var submitStart = stopwatch.ElapsedTicks;
@@ -480,13 +482,12 @@ namespace GroboServer
                     hasTraced = true;
                     break;
                 case TracerPacket.PacketType.MethodStarted:
-                    Log($"Started method {method.ReflectedType.Name}.{method.Name}");
-                    MethodBaseTracingInstaller.AddMethodToMap(method, message.MethodId);
+                    //Log($"Started method {method.ReflectedType.Name}.{method.Name}");
                     functionStartTimes.Push(GetCurrentRuntime());
                     TracingAnalyzer.GetMethodCallTreeForThread(message.ManagedThreadId).StartMethod(message.MethodId);
                     break;
                 case TracerPacket.PacketType.MethodFinished:
-                    Log($"Finished method {method.ReflectedType.Name}.{method.Name} in {message.Elapsed}");
+                    //Log($"Finished method {method.ReflectedType.Name}.{method.Name} in {message.Elapsed}");
                     TracingAnalyzer.GetMethodCallTreeForThread(message.ManagedThreadId).FinishMethod(message.MethodId, functionStartTimes.Pop());
                     break;
             }
